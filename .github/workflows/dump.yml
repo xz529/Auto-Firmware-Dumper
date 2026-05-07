@@ -125,66 +125,66 @@ jobs:
       run: |
         cd DumprX/out
         
-        is_bad_val() {
-            local val=$(echo "$1" | tr '[:upper:]' '[:lower:]')
-            [[ -z "$1" || "$val" == "alps" || "$val" == "unknown" || "$val" == "generic" || "$val" == *"mgvi"* || "$val" == *"64only"* ]]
+        # Функция для очистки
+        clean_val() {
+            echo "$1" | head -1 | sed 's/[[:space:]]//g' | tr -d '\r'
         }
 
-        # Рекурсивный поиск файлов
-        ALL_PROPS=$(find . -name "build*.prop" -o -name "default.prop")
-        
-        # --- ВЫВОД В ТЕРМИНАЛ ---
-        echo "::group::Search Details"
-        echo "Found prop files:"
-        echo "$ALL_PROPS"
-        echo "::endgroup::"
+        # Функция для проверки, является ли значение бесполезным (заглушкой)
+        is_trash() {
+            local val=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+            [[ -z "$1" || "$val" == "alps" || "$val" == "unknown" || "$val" == "generic" || "$val" == "mainline" ]]
+        }
 
-        # 1. Fingerprint
-        fingerprint=$(grep -m1 -oP "(?<=^ro.build.fingerprint=).*" $ALL_PROPS | head -1)
+        # Определяем приоритет файлов (сначала product и vendor, потом всё остальное)
+        PROPS_PRIORITY=$(ls product/build.prop vendor/build.prop odm/build.prop system/system/build.prop system/build.prop 2>/dev/null || find . -name "*.prop")
 
-        # 2. BRAND
-        brand=$(grep -m1 -oP "(?<=^ro.product.manufacturer=).*" $ALL_PROPS | head -1)
-        if is_bad_val "$brand"; then
-            brand=$(grep -m1 -oP "(?<=^ro.product.brand=).*" $ALL_PROPS | head -1)
-        fi
-        if is_bad_val "$brand" && [[ -n "$fingerprint" ]]; then
-            brand=$(echo "$fingerprint" | cut -d'/' -f1)
-        fi
+        # --- ИЗВЛЕЧЕНИЕ BRAND ---
+        for file in $PROPS_PRIORITY; do
+            val=$(grep -ahP "(?<=^ro.product.manufacturer=).*" "$file" | head -1)
+            [[ -z "$val" ]] && val=$(grep -ahP "(?<=^ro.product.brand=).*" "$file" | head -1)
+            val=$(clean_val "$val")
+            if ! is_trash "$val"; then
+                brand="$val"
+                break
+            fi
+        done
+
+        # --- ИЗВЛЕЧЕНИЕ CODENAME (Model) ---
+        for file in $PROPS_PRIORITY; do
+            val=$(grep -ahP "(?<=^ro.product.model=).*" "$file" | head -1)
+            [[ -z "$val" ]] && val=$(grep -ahP "(?<=^ro.product.device=).*" "$file" | head -1)
+            val=$(clean_val "$val")
+            if ! is_trash "$val"; then
+                codename="$val"
+                break
+            fi
+        done
+
+        # --- ИЗВЛЕЧЕНИЕ VERSION & FINGERPRINT ---
+        # Для них обычно достаточно первого совпадения из приоритетных файлов
+        version=$(grep -ahP "(?<=^ro.build.version.release=).*" $PROPS_PRIORITY | grep -v "unknown" | head -1 | tr -d '\r')
+        fingerprint=$(grep -ahP "(?<=^ro.build.fingerprint=).*" $PROPS_PRIORITY | head -1 | tr -d '\r')
+
+        # Фоллбэк (если всё еще пусто)
         [[ -z "$brand" ]] && brand="unknown"
-        brand=$(echo "$brand" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]//g')
+        [[ -z "$codename" ]] && codename="device_$(date +%H%M)"
+        
+        # Финальная очистка для папок (только мелкие буквы)
+        folder_brand=$(echo "$brand" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
+        folder_codename=$(echo "$codename" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
 
-        # 3. CODENAME
-        codename=$(grep -m1 -oP "(?<=^ro.product.model=).*" $ALL_PROPS | head -1)
-        if is_bad_val "$codename"; then
-            codename=$(grep -m1 -oP "(?<=^ro.product.device=).*" $ALL_PROPS | head -1)
-        fi
-        if is_bad_val "$codename" && [[ -n "$fingerprint" ]]; then
-            codename=$(echo "$fingerprint" | cut -d'/' -f2)
-        fi
-        [[ -z "$codename" ]] && codename="device_$(date +%m%d)"
-        codename=$(echo "$codename" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]//g')
-
-        # 4. VERSION
-        version=$(grep -m1 -oP "(?<=^ro.build.version.release_or_codename=).*" $ALL_PROPS | head -1)
-        [[ -z "$version" ]] && version=$(grep -m1 -oP "(?<=^ro.build.version.release=).*" $ALL_PROPS | head -1)
-        [[ -z "$version" ]] && version="unknown"
-
-        # --- ИТОГОВЫЙ ВЫВОД В КОНСОЛЬ ---
-        echo "========================================"
-        echo "  DEVICE EXTRACTED INFO:"
         echo "========================================"
         echo "BRAND       : $brand"
         echo "CODENAME    : $codename"
         echo "VERSION     : $version"
-        echo "FINGERPRINT : $fingerprint"
         echo "========================================"
 
-        # Сохранение в файлы для следующих шагов
-        echo "$codename" > ${{ github.workspace }}/codename.txt
-        echo "$brand" > ${{ github.workspace }}/brand.txt
+        echo "$folder_codename" > ${{ github.workspace }}/codename.txt
+        echo "$folder_brand" > ${{ github.workspace }}/brand.txt
         echo "$version" > ${{ github.workspace }}/version.txt
         echo "$fingerprint" > ${{ github.workspace }}/fingerprint.txt
-        
+
     - name: Uploading ROM Dump
       env:
         GH_TOKEN: ${{ secrets.GH_TOKEN }}
