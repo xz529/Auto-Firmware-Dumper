@@ -126,39 +126,65 @@ jobs:
         cd DumprX/out
         
         is_bad_val() {
-            local val=$(echo "$1" | tr '[:lower:]' '[:upper:]')
-            [[ -z "$1" || "$val" == "ALPS" || "$val" == "UNKNOWN" || "$val" == "GENERIC" || "$val" == *"MGVI"* || "$val" == *"64ONLY"* ]]
+            local val=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+            [[ -z "$1" || "$val" == "alps" || "$val" == "unknown" || "$val" == "generic" || "$val" == *"mgvi"* || "$val" == *"64only"* ]]
         }
 
+        # Рекурсивный поиск файлов
+        ALL_PROPS=$(find . -name "build*.prop" -o -name "default.prop")
+        
+        # --- ВЫВОД В ТЕРМИНАЛ ---
+        echo "::group::Search Details"
+        echo "Found prop files:"
+        echo "$ALL_PROPS"
+        echo "::endgroup::"
+
         # 1. Fingerprint
-        fingerprint=$(grep -m1 -oP "(?<=^ro.build.fingerprint=).*" -hs {system,system/system,vendor,product,system_ext}/build*.prop | head -1)
+        fingerprint=$(grep -m1 -oP "(?<=^ro.build.fingerprint=).*" $ALL_PROPS | head -1)
 
         # 2. BRAND
-        brand=$(grep -m1 -oP "(?<=^ro.product.manufacturer=).*" -hs {vendor,product,system,system_ext}/build*.prop | head -1)
-        [[ -z "$brand" || $(echo "$brand" | tr '[:upper:]' '[:lower:]') == "alps" ]] && brand=$(grep -m1 -oP "(?<=^ro.product.brand=).*" -hs {vendor,product,system,system_ext}/build*.prop | head -1)
-        is_bad_val "$brand" && brand=$(echo "$fingerprint" | cut -d'/' -f1)
-        # Если совсем всё плохо:
+        brand=$(grep -m1 -oP "(?<=^ro.product.manufacturer=).*" $ALL_PROPS | head -1)
+        if is_bad_val "$brand"; then
+            brand=$(grep -m1 -oP "(?<=^ro.product.brand=).*" $ALL_PROPS | head -1)
+        fi
+        if is_bad_val "$brand" && [[ -n "$fingerprint" ]]; then
+            brand=$(echo "$fingerprint" | cut -d'/' -f1)
+        fi
         [[ -z "$brand" ]] && brand="unknown"
-        brand=$(echo "$brand" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]_')
+        brand=$(echo "$brand" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]//g')
 
         # 3. CODENAME
-        codename=$(grep -m1 -oP "(?<=^ro.product.model=).*" -hs {vendor,product,system,system_ext,odm}/build*.prop | head -1)
-        is_bad_val "$codename" && codename=$(grep -m1 -oP "(?<=^ro.product.device=).*" -hs {vendor,product,system,system_ext}/build*.prop | head -1)
-        is_bad_val "$codename" && codename=$(echo "$fingerprint" | cut -d'/' -f3 | cut -d':' -f1)
-        # Если совсем всё плохо:
-        [[ -z "$codename" ]] && codename="device_$(date +%H%M)"
-        codename=$(echo "$codename" | tr -d '[:space:]' | tr '-' '_')
+        codename=$(grep -m1 -oP "(?<=^ro.product.model=).*" $ALL_PROPS | head -1)
+        if is_bad_val "$codename"; then
+            codename=$(grep -m1 -oP "(?<=^ro.product.device=).*" $ALL_PROPS | head -1)
+        fi
+        if is_bad_val "$codename" && [[ -n "$fingerprint" ]]; then
+            codename=$(echo "$fingerprint" | cut -d'/' -f2)
+        fi
+        [[ -z "$codename" ]] && codename="device_$(date +%m%d)"
+        codename=$(echo "$codename" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]//g')
 
         # 4. VERSION
-        version=$(grep -m1 -oP "(?<=^ro.build.version.release_or_codename=).*" -hs {system,system/system,vendor,product,system_ext}/build*.prop | head -1)
-        [[ -z "${version}" ]] && version=$(grep -m1 -oP "(?<=^ro.build.version.release=).*" -hs {system,system/system,vendor,product,system_ext}/build*.prop | head -1)
+        version=$(grep -m1 -oP "(?<=^ro.build.version.release_or_codename=).*" $ALL_PROPS | head -1)
+        [[ -z "$version" ]] && version=$(grep -m1 -oP "(?<=^ro.build.version.release=).*" $ALL_PROPS | head -1)
         [[ -z "$version" ]] && version="unknown"
 
+        # --- ИТОГОВЫЙ ВЫВОД В КОНСОЛЬ ---
+        echo "========================================"
+        echo "  DEVICE EXTRACTED INFO:"
+        echo "========================================"
+        echo "BRAND       : $brand"
+        echo "CODENAME    : $codename"
+        echo "VERSION     : $version"
+        echo "FINGERPRINT : $fingerprint"
+        echo "========================================"
+
+        # Сохранение в файлы для следующих шагов
         echo "$codename" > ${{ github.workspace }}/codename.txt
         echo "$brand" > ${{ github.workspace }}/brand.txt
         echo "$version" > ${{ github.workspace }}/version.txt
         echo "$fingerprint" > ${{ github.workspace }}/fingerprint.txt
-
+        
     - name: Uploading ROM Dump
       env:
         GH_TOKEN: ${{ secrets.GH_TOKEN }}
