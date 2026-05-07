@@ -94,8 +94,14 @@ jobs:
       run: |
         git config --global user.name "${{ env.UN }}"
         git config --global user.email "${{ env.UEM }}"
+
+        # --- ОПТИМИЗАЦИЯ ДЛЯ БОЛЬШИХ ДАННЫХ ---
+        # Увеличиваем буферы Git (фикс ошибки 408)
         git config --global http.postBuffer 999999999
+        git config --global http.lowSpeedLimit 0
+        git config --global http.lowSpeedTime 999999
         git config --global core.compression 9
+        
         unset GITHUB_TOKEN
         gh auth login --with-token <<< "${{ secrets.GTOKEN }}"
       working-directory: ${{ github.workspace }}
@@ -118,7 +124,6 @@ jobs:
       run: |
         cd DumprX/out
         
-        # Функция для проверки "мусорных" значений
         is_bad_val() {
             local val=$(echo "$1" | tr '[:lower:]' '[:upper:]')
             [[ -z "$1" || "$val" == "ALPS" || "$val" == "UNKNOWN" || "$val" == "GENERIC" || "$val" == *"MGVI"* || "$val" == *"64ONLY"* ]]
@@ -127,82 +132,65 @@ jobs:
         # 1. Fingerprint
         fingerprint=$(grep -m1 -oP "(?<=^ro.build.fingerprint=).*" -hs {system,system/system,vendor,product,system_ext}/build*.prop | head -1)
 
-        # 2. BRAND (Tecno/Infinix Fix)
-        # Сначала ищем в ro.product.model или ro.product.manufacturer
+        # 2. BRAND
         brand=$(grep -m1 -oP "(?<=^ro.product.manufacturer=).*" -hs {vendor,product,system,system_ext}/build*.prop | head -1)
         [[ -z "$brand" || $(echo "$brand" | tr '[:upper:]' '[:lower:]') == "alps" ]] && brand=$(grep -m1 -oP "(?<=^ro.product.brand=).*" -hs {vendor,product,system,system_ext}/build*.prop | head -1)
-        
-        if is_bad_val "$brand"; then
-            brand=$(echo "$fingerprint" | cut -d'/' -f1)
-        fi
+        is_bad_val "$brand" && brand=$(echo "$fingerprint" | cut -d'/' -f1)
+        # Если совсем всё плохо:
+        [[ -z "$brand" ]] && brand="unknown"
         brand=$(echo "$brand" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]_')
 
-        # 3. CODENAME 
+        # 3. CODENAME
         codename=$(grep -m1 -oP "(?<=^ro.product.model=).*" -hs {vendor,product,system,system_ext,odm}/build*.prop | head -1)
-        
-        if is_bad_val "$codename"; then
-             codename=$(grep -m1 -oP "(?<=^ro.product.device=).*" -hs {vendor,product,system,system_ext}/build*.prop | head -1)
-        fi
-        
-        # Если всё еще мусор - берем из фингерпринта
-        if is_bad_val "$codename"; then
-            codename=$(echo "$fingerprint" | cut -d'/' -f3 | cut -d':' -f1)
-        fi
+        is_bad_val "$codename" && codename=$(grep -m1 -oP "(?<=^ro.product.device=).*" -hs {vendor,product,system,system_ext}/build*.prop | head -1)
+        is_bad_val "$codename" && codename=$(echo "$fingerprint" | cut -d'/' -f3 | cut -d':' -f1)
+        # Если совсем всё плохо:
+        [[ -z "$codename" ]] && codename="device_$(date +%H%M)"
         codename=$(echo "$codename" | tr -d '[:space:]' | tr '-' '_')
 
         # 4. VERSION
         version=$(grep -m1 -oP "(?<=^ro.build.version.release_or_codename=).*" -hs {system,system/system,vendor,product,system_ext}/build*.prop | head -1)
         [[ -z "${version}" ]] && version=$(grep -m1 -oP "(?<=^ro.build.version.release=).*" -hs {system,system/system,vendor,product,system_ext}/build*.prop | head -1)
+        [[ -z "$version" ]] && version="unknown"
 
         echo "$codename" > ${{ github.workspace }}/codename.txt
         echo "$brand" > ${{ github.workspace }}/brand.txt
         echo "$version" > ${{ github.workspace }}/version.txt
         echo "$fingerprint" > ${{ github.workspace }}/fingerprint.txt
 
-        echo "### 📱 Device Information" >> $GITHUB_STEP_SUMMARY
-        echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-        echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-        echo "| **Brand** | $brand |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Codename** | $codename |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Android Version** | $version |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Fingerprint** | \`$fingerprint\` |" >> $GITHUB_STEP_SUMMARY
-
     - name: Uploading ROM Dump
       env:
-        GH_TOKEN: ${{ secrets.GTOKEN }}
+        GH_TOKEN: ${{ secrets.GH_TOKEN }}
       run: |
         codename=$(cat ${{ github.workspace }}/codename.txt)
         brand=$(cat ${{ github.workspace }}/brand.txt)
         version=$(cat ${{ github.workspace }}/version.txt)
         repo_name="dump_${brand}_${codename}"
         dat=$(date +%Y%m%d)
-
-        cd DumprX/out
-        sudo chmod -R 777 *
-        sudo rm -rf .git
         
+        cd DumprX/out
+        
+        sudo rm -rf .git
         git config --global init.defaultBranch main
         git init
         git branch -M dump-"$codename"-"$dat"
         git add .
         git commit -s -m "Dump for $brand $codename (Android $version)"
         
-        # ПРОВЕРКА: Если репозиторий существует - не создаем, а просто пушим
+        # Проверка и создание репозитория
         if gh repo view "${{ github.repository_owner }}/$repo_name" >/dev/null 2>&1; then
-          echo "Repository exists, pushing to it..."
           git remote add origin "https://github.com/${{ github.repository_owner }}/$repo_name.git"
           git push -u origin dump-"$codename"-"$dat" --force
         else
-          echo "Creating new repository..."
           gh repo create "$repo_name" --public --description="Dump for $brand $codename" --source=. --remote=origin --push
         fi
 
-        # Подготовка путей для следующих шагов
+        # Подготовка структуры для следующих шагов
         mkdir -p ${{ github.workspace }}/vnd_project/dump
         mkdir -p ${{ github.workspace }}/vnd_project/android/device/"$brand"/"$codename"
         [ -d "lineage-device-tree" ] && mv lineage-device-tree/* ${{ github.workspace }}/vnd_project/android/device/"$brand"/"$codename"/
         mv * ${{ github.workspace }}/vnd_project/dump/ 2>/dev/null || true
-        
+
     - name: Create vendor tree
       if: env.GVT == 'true'
       run: |
