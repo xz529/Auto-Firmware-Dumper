@@ -102,6 +102,9 @@ jobs:
         git config --global http.lowSpeedTime 999999
         git config --global http.version HTTP/1.1
         git config --global core.compression 9
+
+        git config --global pack.windowMemory "256m"
+        git config --global pack.packSizeLimit "256m"
         
         unset GITHUB_TOKEN
         gh auth login --with-token <<< "${{ secrets.GTOKEN }}"
