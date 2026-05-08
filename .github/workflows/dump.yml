@@ -95,18 +95,24 @@ jobs:
         git config --global user.name "${{ env.UN }}"
         git config --global user.email "${{ env.UEM }}"
 
-        # --- ОПТИМИЗАЦИЯ ДЛЯ БОЛЬШИХ ДАННЫХ ---
-        # Увеличиваем буферы Git (фикс ошибки 408)
-        git config --global http.postBuffer 999999999
-        git config --global http.lowSpeedLimit 0
-        git config --global http.lowSpeedTime 999999
+        # Оптимизация сети
+        git config --global http.postBuffer 524288000
         git config --global http.version HTTP/1.1
-        git config --global core.compression 9
-
-        git config --global pack.windowMemory "256m"
-        git config --global pack.packSizeLimit "256m"
+        # Уменьшаем сжатие, чтобы не вылететь по памяти
+        git config --global core.compression 1
         
+        # Настройка лимитов памяти для упаковки объектов
+        git config --global pack.windowMemory "512m"
+        git config --global pack.packSizeLimit "512m"
+        git config --global pack.threads "1"
+
+        # Принудительно устанавливаем URL с токеном
+        git remote set-url origin https://x-access-token:${{ secrets.GTOKEN }}@github.com/${{ github.repository }}.git
+
+        # Если файлов ОЧЕНЬ много, можно попробовать сделать "чистку" перед пушем
+        git gc --prune=now --aggressive
         unset GITHUB_TOKEN
+        
         gh auth login --with-token <<< "${{ secrets.GTOKEN }}"
       working-directory: ${{ github.workspace }}
   
