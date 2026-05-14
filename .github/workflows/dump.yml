@@ -96,10 +96,12 @@ jobs:
         git config --global user.email "${{ env.UEM }}"
 
         # Оптимизация сети
-        git config --global http.postBuffer 1048576000
+        git config --global http.postBuffer 4221225472
         #git config --global http.version HTTP/1.1
         # Уменьшаем сжатие, чтобы не вылететь по памяти
         git config --global core.compression 1
+        git config --global http.lowSpeedLimit 0
+        git config --global http.lowSpeedTime 999999
         
         # Настройка лимитов памяти для упаковки объектов
         git config --global pack.windowMemory "512m"
@@ -152,8 +154,8 @@ jobs:
         # Очистка имен (важно для Tecno Pova, где могут быть пробелы)
         brand=$(echo "$brand" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]_')
         codename=$(echo "$codename" | tr -d '[:space:]' | tr '-' '_')
-        [[ -z "$brand" ]] && brand="tecno"
-        [[ -z "$codename" ]] && codename="pova_7_ultra"
+        [[ -z "$brand" ]] && brand="${{ github.event.inputs.VENDOR_NAME }}"
+        [[ -z "$codename" ]] && codename="${{ github.event.inputs.CODE_NAME }}"
 
         # Сохраняем (в корень воркаута, чтобы другие шаги видели)
         
