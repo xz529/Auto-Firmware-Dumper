@@ -168,7 +168,14 @@ jobs:
         echo "$codename" > ${{ github.workspace }}/codename.txt
         echo "$brand" > ${{ github.workspace }}/brand.txt
         echo "$version" > ${{ github.workspace }}/version.txt
-
+        
+    - name: Save Heavy Files to Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: Full_Dump_Files
+        path: ${{ github.workspace }}/DumprX/out/
+        retention-days: 5
+        
     - name: Uploading ROM Dump
       env:
         GH_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -266,10 +273,3 @@ jobs:
         if-no-files-found: ignore
       continue-on-error: true
 
-      
-    - name: Save Heavy Files to Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: Full_Dump_Files
-        path: ${{ github.workspace }}/DumprX/out/
-        retention-days: 5
