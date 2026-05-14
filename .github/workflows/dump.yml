@@ -23,6 +23,11 @@ on:
         description: 'Code name '
         required: true
         default: ''
+      xz:
+        description: 'Save Heavy Files to Artifacts'
+        required: false
+        default: 'true'
+        type: boolean
       GENERATE_VENDOR:
         description: 'Create Vendor Tree'
         required: true
@@ -134,6 +139,7 @@ jobs:
 
     - name: Extract Device Info
       run: |
+        sudo chown -R $USER:$USER DumprX/out/
         cd DumprX/out
         
         # Ищем build.prop рекурсивно по всем важным разделам
@@ -171,6 +177,7 @@ jobs:
         
     - name: Save Heavy Files to Artifacts
       uses: actions/upload-artifact@v4
+      if: env.xz == 'true'
       with:
         name: Full_Dump_Files
         path: ${{ github.workspace }}/DumprX/out/
