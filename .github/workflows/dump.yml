@@ -207,7 +207,7 @@ jobs:
         
         git branch -M main
         git add .
-        git commit -s -m "Dump for $brand $codename (Android $version) [Попытка полного пуша]"
+        git commit -s -m "Dump for $brand $codename (Android $version)"
         
         # 1. Проверяем/Создаем репозиторий на GitHub через CLI
         if ! gh repo view "${{ github.repository_owner }}/$repo_name" >/dev/null 2>&1; then
@@ -223,7 +223,7 @@ jobs:
         
         # Тюнинг сети для LFS
         git config lfs.https://github.com/.locksverify false
-        git config http.postBuffer 524288000
+        git config http.postBuffer 6221225472
 
         echo "🚀 Попытка выгрузить весь дамп напрямую в репозиторий..."
         
