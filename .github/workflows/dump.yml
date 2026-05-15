@@ -101,7 +101,7 @@ jobs:
         git config --global user.email "${{ env.UEM }}"
 
         # Оптимизация сети
-        git config --global http.postBuffer 4221225472
+        git config --global http.postBuffer 6221225472
         #git config --global http.version HTTP/1.1
         # Уменьшаем сжатие, чтобы не вылететь по памяти
         git config --global core.compression 1
@@ -175,14 +175,6 @@ jobs:
         echo "$brand" > ${{ github.workspace }}/brand.txt
         echo "$version" > ${{ github.workspace }}/version.txt
         
-    - name: Save Heavy Files to Artifacts
-      uses: actions/upload-artifact@v4
-      if: env.xz == 'true'
-      with:
-        name: Full_Dump_Files
-        path: ${{ github.workspace }}/DumprX/out/
-        retention-days: 5
-        
     - name: Uploading ROM Dump
       env:
         GH_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -234,7 +226,14 @@ jobs:
            echo "LINEAGEOS DEVICE TREE NOT FOUND!"
            exit 1
         fi
-
+        
+    - name: Save Heavy Files to Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: Full_Dump_Files
+        path: ${{ github.workspace }}/DumprX/out/
+        retention-days: 5
+        
     - name: Uploading Vendor Tree
       if: env.GVT == 'true'
       env:
