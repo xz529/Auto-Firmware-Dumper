@@ -177,7 +177,8 @@ jobs:
         
     - name: Uploading ROM Dump
       env:
-        GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        # Используем GTOKEN (убедитесь, что в Settings -> Secrets ваш секрет называется именно так)
+        GH_TOKEN: ${{ secrets.GTOKEN }} 
       run: |
         codename=$(cat ${{ github.workspace }}/codename.txt)
         brand=$(cat ${{ github.workspace }}/brand.txt)
@@ -190,16 +191,27 @@ jobs:
         sudo rm -rf .git
         git config --global init.defaultBranch main
         git init
+        
+        # Настраиваем имя и почту локально для этого репозитория
+        git config user.name "${{ env.UN }}"
+        git config user.email "${{ env.UEM }}"
+        
         git branch -M dump-"$codename"-"$dat"
         git add .
         git commit -s -m "Dump for $brand $codename (Android $version)"
         
-        # Проверка и создание репозитория
+        # Проверка и создание репозитория с принудительной подстановкой токена
         if gh repo view "${{ github.repository_owner }}/$repo_name" >/dev/null 2>&1; then
-          git remote add origin "https://github.com/${{ github.repository_owner }}/$repo_name.git"
+          # Если репо существует, привязываем URL с токеном напрямую
+          git remote add origin "https://x-access-token:${{ secrets.GTOKEN }}@github.com/${{ github.repository_owner }}/$repo_name.git"
           git push -u origin dump-"$codename"-"$dat" --force
         else
-          gh repo create "$repo_name" --public --description="Dump for $brand $codename" --source=. --remote=origin --push
+          # Если репо нет, создаем через gh CLI (он подхватит GH_TOKEN из env)
+          gh repo create "$repo_name" --public --description="Dump for $brand $codename" --source=. --remote=origin
+          
+          # Переписываем созданный URL, добавляя туда токен перед отправкой кода
+          git remote set-url origin "https://x-access-token:${{ secrets.GTOKEN }}@github.com/${{ github.repository_owner }}/$repo_name.git"
+          git push -u origin dump-"$codename"-"$dat" --force
         fi
 
         # Подготовка структуры для следующих шагов
