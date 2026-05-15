@@ -174,10 +174,9 @@ jobs:
         echo "$codename" > ${{ github.workspace }}/codename.txt
         echo "$brand" > ${{ github.workspace }}/brand.txt
         echo "$version" > ${{ github.workspace }}/version.txt
-        
+      
     - name: Uploading ROM Dump
       env:
-        # Используем GTOKEN (убедитесь, что в Settings -> Secrets ваш секрет называется именно так)
         GH_TOKEN: ${{ secrets.GTOKEN }} 
       run: |
         codename=$(cat ${{ github.workspace }}/codename.txt)
@@ -185,6 +184,11 @@ jobs:
         version=$(cat ${{ github.workspace }}/version.txt)
         repo_name="dump_${brand}_${codename}"
         dat=$(date +%Y%m%d)
+        tag_name="dump-${codename}-${dat}"
+        
+        # Установка Git LFS на случай, если первая попытка пойдет через него
+        sudo apt-get install git-lfs -y
+        git lfs install
         
         cd DumprX/out
         
@@ -192,26 +196,75 @@ jobs:
         git config --global init.defaultBranch main
         git init
         
-        # Настраиваем имя и почту локально для этого репозитория
         git config user.name "${{ env.UN }}"
         git config user.email "${{ env.UEM }}"
         
-        git branch -M dump-"$codename"-"$dat"
-        git add .
-        git commit -s -m "Dump for $brand $codename (Android $version)"
+        # Настраиваем отслеживание больших файлов для первой попытки
+        git lfs track "*.img"
+        git lfs track "*.bin"
+        git lfs track "*.zip"
+        git add .gitattributes
         
-        # Проверка и создание репозитория с принудительной подстановкой токена
-        if gh repo view "${{ github.repository_owner }}/$repo_name" >/dev/null 2>&1; then
-          # Если репо существует, привязываем URL с токеном напрямую
-          git remote add origin "https://x-access-token:${{ secrets.GTOKEN }}@github.com/${{ github.repository_owner }}/$repo_name.git"
-          git push -u origin dump-"$codename"-"$dat" --force
-        else
-          # Если репо нет, создаем через gh CLI (он подхватит GH_TOKEN из env)
+        git branch -M main
+        git add .
+        git commit -s -m "Dump for $brand $codename (Android $version) [Попытка полного пуша]"
+        
+        # Проверка и создание репозитория, если его еще нет
+        if ! gh repo view "${{ github.repository_owner }}/$repo_name" >/dev/null 2>&1; then
           gh repo create "$repo_name" --public --description="Dump for $brand $codename" --source=. --remote=origin
+        fi
+        
+        git remote set-url origin "https://x-access-token:${{ secrets.GTOKEN }}@github.com/${{ github.repository_owner }}/$repo_name.git"
+        
+        git config lfs.https://github.com/.locksverify false
+        git config http.postBuffer 524288000
+
+        echo "🚀 Попытка выгрузить весь дамп напрямую в репозиторий..."
+        
+        # Пытаемся сделать push. Если команда падает, срабатывает блок '||' (OR)
+        if git push -u origin main --force; then
+          echo "✅ Успешно! Весь дамп загружен в ветку репозитория."
+        else
+          echo "⚠️ Ошибка при обычном push (возможно, исчерпан лимит LFS или сбой сети)."
+          echo "📦 Переходим к резервному плану: упаковка в архив и загрузка в Релизы..."
           
-          # Переписываем созданный URL, добавляя туда токен перед отправкой кода
-          git remote set-url origin "https://x-access-token:${{ secrets.GTOKEN }}@github.com/${{ github.repository_owner }}/$repo_name.git"
-          git push -u origin dump-"$codename"-"$dat" --force
+          # 1. Очищаем неудачную локальную историю Git, чтобы не путаться
+          sudo rm -rf .git
+          
+          # 2. Создаем чистый репозиторий ТОЛЬКО для текстовых файлов (чтобы репо не был пустым)
+          git init
+          git config user.name "${{ env.UN }}"
+          git config user.email "${{ env.UEM }}"
+          
+          # Игнорируем тяжелые файлы для текстового коммита
+          echo "*.img" > .gitignore
+          echo "*.bin" >> .gitignore
+          echo "*.zip" >> .gitignore
+          echo "*.7z" >> .gitignore
+          
+          git branch -M main
+          git add .
+          git commit -s -m "Dump for $brand $codename (Android $version) [Только текстовая структура]"
+          git remote add origin "https://x-access-token:${{ secrets.GTOKEN }}@github.com/${{ github.repository_owner }}/$repo_name.git"
+          git push -u origin main --force
+          
+          # 3. Архивируем ВЕСЬ дамп (включая .img файлы) в один архив .7z с максимальным сжатием
+          echo "🗜️ Создаем архив полного дампа (это может занять время)..."
+          # Исключаем файлы git, чтобы архив был чистым. Пакуем всё текущее содержимое.
+          7z a -mx=1 "${github.workspace}/full_dump_${codename}.7z" ./*
+          
+          # 4. Создаем релиз на GitHub
+          echo "🏷️ Создаем GitHub Release..."
+          gh release create "$tag_name" --repo "${{ github.repository_owner }}/$repo_name" --title "Full Dump $brand $codename" --notes "Архив с полным дампом прошивки, так как лимиты репозитория были превышены." || true
+          
+          # 5. Загружаем архив в созданный релиз
+          echo "📤 Загружаем архив в релиз..."
+          gh release upload "$tag_name" --repo "${{ github.repository_owner }}/$repo_name" "${github.workspace}/full_dump_${codename}.7z"
+          
+          echo "🎉 Полный дамп успешно сохранен в Релизах!"
+          
+          # Удаляем локальный тяжелый архив, чтобы не забивать место на Runner'е для следующих шагов
+          rm -f "${github.workspace}/full_dump_${codename}.7z"
         fi
 
         # Подготовка структуры для следующих шагов
