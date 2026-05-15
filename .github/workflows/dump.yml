@@ -215,7 +215,10 @@ jobs:
           gh repo create "$repo_name" --public --description="Dump for $brand $codename" --source=.
         fi
         
-        # 2. ИСПРАВЛЕНИЕ ОШИБКИ: Привязываем origin с нуля через 'remote add'
+        # Удаляем автоматически созданный или старый remote перед первой привязкой
+        git remote remove origin 2>/dev/null || true
+        
+        # Безопасно привязываем origin с нуля, вшивая токен
         git remote add origin "https://x-access-token:${{ secrets.GTOKEN }}@github.com/${{ github.repository_owner }}/$repo_name.git"
         
         # Тюнинг сети для LFS
@@ -247,6 +250,10 @@ jobs:
           git add .
           git commit -s -m "Dump for $brand $codename (Android $version) [Только текстовая структура]"
           
+          # ИСПРАВЛЕНИЕ ТЕКУЩЕЙ ОШИБКИ: 
+          # Точно так же удаляем возможный origin перед повторной привязкой в блоке аварийного фолбека
+          git remote remove origin 2>/dev/null || true
+          
           # Привязываем origin заново после очистки папки .git
           git remote add origin "https://x-access-token:${{ secrets.GTOKEN }}@github.com/${{ github.repository_owner }}/$repo_name.git"
           git push -u origin main --force
@@ -266,12 +273,12 @@ jobs:
           rm -f "${{ github.workspace }}/full_dump_${codename}.7z"
         fi
 
-        # Подготовка структуры для следующих шагов (оставляем без изменений)
+        # Подготовка структуры для следующих шагов
         mkdir -p ${{ github.workspace }}/vnd_project/dump
         mkdir -p ${{ github.workspace }}/vnd_project/android/device/"$brand"/"$codename"
         [ -d "lineage-device-tree" ] && mv lineage-device-tree/* ${{ github.workspace }}/vnd_project/android/device/"$brand"/"$codename"/
         mv * ${{ github.workspace }}/vnd_project/dump/ 2>/dev/null || true
-
+        
     - name: Create vendor tree
       if: env.GVT == 'true'
       run: |
