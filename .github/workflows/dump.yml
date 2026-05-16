@@ -204,7 +204,7 @@ jobs:
 
         echo "=== Полное клонирование репозитория декомпилятора ==="
         rm -rf ${{ github.workspace }}/SELinux-CIL-Decompiler
-        git clone --depth 1 https://github.com/isus203/SELinux-CIL-Decompiler.git ${{ github.workspace }}/SELinux-CIL-Decompile
+        git clone --depth 1 https://github.com/isus203/SELinux-CIL-Decompiler.git ${{ github.workspace }}/SELinux-CIL-Decompiler
 
         # Проверяем наличие файлов для декомпиляции и самого скрипта
         if [ -f "${{ github.workspace }}/SELinux-CIL-Decompiler/decompile_cil.py" ]; then
