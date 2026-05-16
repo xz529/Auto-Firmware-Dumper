@@ -174,76 +174,124 @@ jobs:
         echo "$codename" > ${{ github.workspace }}/codename.txt
         echo "$brand" > ${{ github.workspace }}/brand.txt
         echo "$version" > ${{ github.workspace }}/version.txt
-        
-    - name: Uploading ROM Dump
-      env:
-        GH_TOKEN: ${{ secrets.GTOKEN }} 
+
+    - name: Collect SELinux Files & Decompile
       run: |
-        codename=$(cat ${{ github.workspace }}/codename.txt)
-        brand=$(cat ${{ github.workspace }}/brand.txt)
-        version=$(cat ${{ github.workspace }}/version.txt)
-        repo_name="dump_${brand}_${codename}"
-        dat=$(date +%Y%m%d)
-        tag_name="dump-${codename}-${dat}"
+        # 1. Создаем целевую структуру папок внутри папки дампа (DumprX/out/selinux)
+        mkdir -p DumprX/out/selinux/system
+        mkdir -p DumprX/out/selinux/vendor
+        mkdir -p DumprX/out/selinux/product
+        mkdir -p DumprX/out/selinux/system_ext
+        mkdir -p DumprX/out/selinux/odm
         
-        # Переходим в папку с результатами дампа
-        cd DumprX/out
+        # Создаем временную папку, которую ожидает декомпилятор на вход (-s)
+        mkdir -p ${{ github.workspace }}/input_sepolicy
         
-        # Полностью очищаем локальный Git, если он был создан утилитой DumprX
-        sudo rm -rf .git
-        git config --global init.defaultBranch main
-        git init
+        echo "=== Копирование папок SELinux из разделов дампа ==="
         
-        git config user.name "${{ env.UN }}"
-        git config user.email "${{ env.UEM }}"
+        # Функция для безопасного копирования: если папка в дампе есть, копируем её содержимое
+        copy_selinux_dir() {
+          local src_dir="$1"
+          local dest_name="$2"
+          
+          if [ -d "$src_dir" ]; then
+            echo "Найдена папка для $dest_name -> $src_dir"
+            # Копируем оригиналы в папку out для финального архива прошивки
+            cp -r "$src_dir"/* DumprX/out/selinux/$dest_name/ 2>/dev/null || true
+            
+            # Копируем во временную папку для декомпилятора, воссоздавая путь (system/etc/selinux и т.д.)
+            local rel_path=$(echo "$src_dir" | sed 's|DumprX/out/||')
+            mkdir -p "${{ github.workspace }}/input_sepolicy/$rel_path"
+            cp -r "$src_dir"/* "${{ github.workspace }}/input_sepolicy/$rel_path/" 2>/dev/null || true
+          fi
+        }
+
+        # Проверяем все стандартные пути размещения SELinux в Android (как /etc/selinux, так и в корне разделов)
+        copy_selinux_dir "DumprX/out/system/etc/selinux" "system"
+        copy_selinux_dir "DumprX/out/system/system/etc/selinux" "system"
         
-        # Создаем README.md, чтобы репозиторий имел хотя бы один файл (требование GitHub для релизов)
-        echo "# Dump for $brand $codename" > README.md
-        echo "Full firmware dump archive is available in the [Releases](../../releases) section." >> README.md
-        echo "Android Version: $version" >> README.md
-        echo "Date: $dat" >> README.md
+        copy_selinux_dir "DumprX/out/vendor/etc/selinux" "vendor"
+        copy_selinux_dir "DumprX/out/vendor/system/etc/selinux" "vendor"
         
-        # Добавляем ТОЛЬКО README.md. Сами файлы дампа в коммит НЕ попадут
-        git add README.md
-        git commit -s -m "Initial commit: Dump placeholder for $brand $codename"
-        
-        # Проверяем или создаем репозиторий на GitHub
-        if ! gh repo view "${{ github.repository_owner }}/$repo_name" >/dev/null 2>&1; then
-          echo "Репозиторий не найден. Создаем новый..."
-          gh repo create "$repo_name" --public --description="Dump for $brand $codename" --source=.
+        copy_selinux_dir "DumprX/out/product/etc/selinux" "product"
+        copy_selinux_dir "DumprX/out/system_ext/etc/selinux" "system_ext"
+        copy_selinux_dir "DumprX/out/odm/etc/selinux" "odm"
+
+        echo "=== Полное клонирование репозитория декомпилятора ==="
+        # Стираем старую папку, если она была, и клонируем репозиторий полностью
+        rm -rf ${{ github.workspace }}/SELinux-CIL-Decompile
+        git clone --depth 1 https://github.com/isus203/SELinux-CIL-Decompiler.git ${{ github.workspace }}/SELinux-CIL-Decompile
+
+        # Проверяем наличие файлов для декомпиляции и самого скрипта
+        if [ -f "${{ github.workspace }}/SELinux-CIL-Decompile/decompile_cil.py" ]; then
+          if [ -n "$(ls -A ${{ github.workspace }}/input_sepolicy 2>/dev/null)" ]; then
+            echo "=== Запуск декомпилятора ==="
+            # Создаем папку под результат декомпиляции внутри релиза
+            mkdir -p DumprX/out/selinux/decompiled_te
+            
+            # Запуск скрипта из папки склонированного репозитория
+            python3 ${{ github.workspace }}/SELinux-CIL-Decompile/decompile_cil.py -s ${{ github.workspace }}/input_sepolicy -o DumprX/out/selinux/decompiled_te
+            echo "✅ Декомпиляция успешно завершена!"
+          else
+            echo "::warning::В указанных папках дампа файлы SELinux не обнаружены. Декомпиляция пропущена."
+          fi
+        else
+          echo "::error::Скрипт decompile_cil.py не найден внутри склонированного репозитория!"
+          exit 1
         fi
         
-        # Удаляем автоматический remote и привязываем заново с токеном
-        git remote remove origin 2>/dev/null || true
-        git remote add origin "https://x-access-token:${{ secrets.GTOKEN }}@github.com/${{ github.repository_owner }}/$repo_name.git"
+        # Очищаем временное дерево сборщика
+        rm -rf ${{ github.workspace }}/input_sepolicy
         
-        # Пушим только один файл README.md (это весит 1 КБ и пройдёт мгновенно)
-        echo "🚀 Создаем структуру репозитория на GitHub..."
-        git push -u origin main --force
-        
-        # Создаем архив полного дампа. Исключаем README.md и временные файлы git
-        echo "🗜️ Упаковываем весь дамп в один .7z архив (это может занять пару минут)..."
-        # Флаг -mx=1 включает быстрое сжатие, чтобы воркфлоу не завершился по таймауту
-        7z a -mx=1 "${{ github.workspace }}/full_dump_${codename}.7z" ./* -xr!.git -xr!README.md
-        
-        # Создаем GitHub Release
-        echo "🏷️ Создаем GitHub Release..."
-        gh release create "$tag_name" --repo "${{ github.repository_owner }}/$repo_name" --title "Full Dump $brand $codename" --notes "Полный архив прошивки (Android $version) от $dat." || true
-        
-        # Загружаем архив прямо в релиз через API (минуя ограничения Git)
-        echo "📤 Загружаем архив в релиз..."
-        gh release upload "$tag_name" --repo "${{ github.repository_owner }}/$repo_name" "${{ github.workspace }}/full_dump_${codename}.7z" --clobber
-        
-        echo "🎉 Архив успешно загружен в Релизы!"
-        
-        # Удаляем тяжелый архив из рабочей директории, чтобы освободить место на Runner
-        rm -f "${{ github.workspace }}/full_dump_${codename}.7z"
-
-        # Подготовка структуры для следующих шагов вашего workflow (Create vendor tree и т.д.)
-        mkdir -p ${{ github.workspace }}/vnd_project/dump
-        mkdir -p ${{ github.workspace }}/vnd_project/android/device/"$brand"/"$codename"
-        [ -d "lineage-device-tree" ] && mv lineage-device-tree/* ${{ github.workspace }}/vnd_project/android/device/"$brand"/"$codename"/
-        mv * ${{ github.workspace }}/vnd_project/dump/ 2>/dev/null || true
+name: Uploading ROM Dump (Only Archive to Release)
+env:
+GH_TOKEN: ${{ secrets.GTOKEN }}
+run: |
+    codename=$(cat ${{ github.workspace }}/codename.txt)
+    brand=$(cat ${{ github.workspace }}/brand.txt)
+    version=$(cat ${{ github.workspace }}/version.txt)
+    repo_name="dump_${brand}_${codename}"
+    dat=$(date +%Y%m%d)
+    tag_name="dump-${codename}-${dat}"
+    
+    cd DumprX/out
+    sudo rm -rf .git
+    
+    git config --global init.defaultBranch main
+    git init
+    git config user.name "${{ env.UN }}"
+    git config user.email "${{ env.UEM }}"
+    
+    echo "# Dump for $brand $codename" > README.md
+    echo "Full firmware dump archive is available in the [Releases](../../releases) section." >> README.md
+    echo "Android Version: $version" >> README.md
+    echo "Date: $dat" >> README.md
+    
+    git add README.md
+    git commit -s -m "Initial commit: Dump placeholder for $brand $codename"
+    
+    if ! gh repo view "${{ github.repository_owner }}/$repo_name" >/dev/null 2>&1; then
+    gh repo create "$repo_name" --public --description="Dump for $brand $codename" --source=.
+    fi
+    
+    git remote remove origin 2>/dev/null || true
+    git remote add origin "https://x-access-token:${{ secrets.GTOKEN }}@github.com/${{github.repository_owner }}/$repo_name.git"
+    git push -u origin main --force
+    
+    echo "🗜️ Упаковываем весь дамп (включая папку decompiled_sepolicy) в один .7z..."
+    7z a -mx=1 "${{ github.workspace }}/full_dump_${codename}.7z" ./* -xr!.git -xr!README.md
+    echo "🏷️ Создаем GitHub Release..."
+    gh release create "$tag_name" --repo "${{ github.repository_owner }}/$repo_name" --title "Full Dump $brand $codename" --notes "Полный архив прошивки с декомпилированными SEPolicy политиками." || true
+    echo "📤 Загружаем архив в релиз..."
+    
+    gh release upload "$tag_name" --repo "${{ github.repository_owner }}/$repo_name" "${{github.workspace }}/full_dump_${codename}.7z" --clobber
+    rm -f "${{ github.workspace }}/full_dump_${codename}.7z"
+    
+    # Подготовка структуры для следующих шагов
+    mkdir -p ${{ github.workspace }}/vnd_project/dump
+    mkdir -p ${{ github.workspace }}/vnd_project/android/device/"$brand"/"$codename"
+    [ -d "lineage-device-tree" ] && mv lineage-device-tree/* ${{ github.workspace}}/vnd_project/android/device/"$brand"/"$codename"/
+    mv * ${{ github.workspace }}/vnd_project/dump/ 2>/dev/null || true
 
     - name: Create vendor tree
       if: env.GVT == 'true'
