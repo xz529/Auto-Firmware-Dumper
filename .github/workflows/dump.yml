@@ -203,7 +203,7 @@ jobs:
         copy_selinux_dir "DumprX/out/odm/etc/selinux" "odm"
 
         echo "=== Полное клонирование репозитория декомпилятора ==="
-        rm -rf ${{ github.workspace }}/SELinux-CIL-Decompile
+        rm -rf ${{ github.workspace }}/SELinux-CIL-Decompiler
         git clone --depth 1 https://github.com/isus203/SELinux-CIL-Decompiler.git ${{ github.workspace }}/SELinux-CIL-Decompile
 
         # Проверяем наличие файлов для декомпиляции и самого скрипта
@@ -212,7 +212,7 @@ jobs:
             echo "=== Запуск декомпилятора ==="
             mkdir -p DumprX/out/selinux/decompiled_te
             
-            python3 ${{ github.workspace }}/SELinux-CIL-Decompile/decompile_cil.py -s ${{ github.workspace }}/input_sepolicy -o DumprX/out/selinux/decompiled_te
+            python3 ${{ github.workspace }}/SELinux-CIL-Decompiler/decompile_cil.py -s ${{ github.workspace }}/input_sepolicy -o DumprX/out/selinux/decompiled_te
             echo "✅ Декомпиляция успешно завершена!"
           else
             echo "::warning::В указанных папках дампа файлы SELinux не обнаружены. Декомпиляция пропущена."
@@ -293,13 +293,6 @@ jobs:
            echo "LINEAGEOS DEVICE TREE NOT FOUND!"
            exit 1
         fi
-        
-    - name: Save Heavy Files to Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: Full_Dump_Files
-        path: ${{ github.workspace }}/DumprX/out/
-        retention-days: 5
         
     - name: Uploading Vendor Tree
       if: env.GVT == 'true'
