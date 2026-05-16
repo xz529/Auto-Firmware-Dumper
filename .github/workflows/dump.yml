@@ -174,8 +174,9 @@ jobs:
         mkdir -p DumprX/out/selinux/system_ext
         mkdir -p DumprX/out/selinux/odm
         
-        # Создаем временную папку, которую ожидает декомпилятор на вход (-s)
-        mkdir -p ${{ github.workspace }}/input_sepolicy
+        # Создаем изолированную рабочую папку для самого декомпилятора внутри workspace
+        # Это исключит путаницу с абсолютными путями раннера /home/runner/work/
+        rm -rf sepolicy_work && mkdir -p sepolicy_work/input
         
         echo "=== Копирование папок SELinux из разделов дампа ==="
         
@@ -186,16 +187,18 @@ jobs:
           
           if [ -d "$src_dir" ]; then
             echo "Найдена папка для $dest_name -> $src_dir"
+            # Копируем оригиналы в папку out для финального архива прошивки
             cp -r "$src_dir"/* DumprX/out/selinux/$dest_name/ 2>/dev/null || true
             
+            # Воссоздаем относительную структуру папок БЕЗ префикса DumprX/out/
+            # Например: sepolicy_work/input/system/etc/selinux/
             local rel_path=$(echo "$src_dir" | sed 's|DumprX/out/||')
-            mkdir -p "${{ github.workspace }}/input_sepolicy/$rel_path"
-            cp -r "$src_dir"/* "${{ github.workspace }}/input_sepolicy/$rel_path/" 2>/dev/null || true
+            mkdir -p "sepolicy_work/input/$rel_path"
+            cp -r "$src_dir"/* "sepolicy_work/input/$rel_path/" 2>/dev/null || true
           fi
         }
 
-        # Проверяем все стандартные пути размещения SELinux в Android
-        copy_selinux_dir "DumprX/out/system/etc/selinux" "system"
+        # Проверяем все варианты путей размещения SELinux в Android
         copy_selinux_dir "DumprX/out/system/system/etc/selinux" "system"
         copy_selinux_dir "DumprX/out/vendor/etc/selinux" "vendor"
         copy_selinux_dir "DumprX/out/product/etc/selinux" "product"
@@ -203,16 +206,23 @@ jobs:
         copy_selinux_dir "DumprX/out/odm/etc/selinux" "odm"
 
         echo "=== Полное клонирование репозитория декомпилятора ==="
-        rm -rf ${{ github.workspace }}/SELinux-CIL-Decompiler
-        git clone --depth 1 https://github.com/isus203/SELinux-CIL-Decompiler.git ${{ github.workspace }}/SELinux-CIL-Decompiler
+        rm -rf SELinux-CIL-Decompiler
+        git clone --depth 1 https://github.com/isus203/SELinux-CIL-Decompiler.git SELinux-CIL-Decompiler
 
-        # Проверяем наличие файлов для декомпиляции и самого скрипта
-        if [ -f "${{ github.workspace }}/SELinux-CIL-Decompiler/decompile_cil.py" ]; then
-          if [ -n "$(ls -A ${{ github.workspace }}/input_sepolicy 2>/dev/null)" ]; then
+        # Проверяем наличие файлов для декомпиляции и скрипта
+        if [ -f "SELinux-CIL-Decompiler/decompile_cil.py" ]; then
+          if [ -n "$(ls -A sepolicy_work/input 2>/dev/null)" ]; then
             echo "=== Запуск декомпилятора ==="
             mkdir -p DumprX/out/selinux/decompiled_te
             
-            python3 ${{ github.workspace }}/SELinux-CIL-Decompiler/decompile_cil.py -s ${{ github.workspace }}/input_sepolicy -o DumprX/out/selinux/decompiled_te
+            # Переходим в изолированную рабочую папку, чтобы python-скрипт 
+            # работал внутри неё с чистыми относительными путями (input/system/etc/...)
+            cd sepolicy_work
+            
+            python3 ../SELinux-CIL-Decompiler/decompile_cil.py -s input -o ../DumprX/out/selinux/decompiled_te
+            
+            # Возвращаемся обратно в корень workspace
+            cd ..
             echo "✅ Декомпиляция успешно завершена!"
           else
             echo "::warning::В указанных папках дампа файлы SELinux не обнаружены. Декомпиляция пропущена."
@@ -222,8 +232,9 @@ jobs:
           exit 1
         fi
         
-        rm -rf ${{ github.workspace }}/input_sepolicy
-
+        # Полная очистка временной рабочей директории
+        rm -rf sepolicy_work
+        
     - name: Uploading ROM Dump (Only Archive to Release)
       env:
         GH_TOKEN: ${{ secrets.GTOKEN }}
