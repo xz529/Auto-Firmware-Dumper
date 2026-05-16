@@ -78,7 +78,7 @@ jobs:
       run: |
         sudo apt update
         sudo apt -y upgrade
-        sudo apt -y install cpio aria2 git python3 neofetch tar gzip p7zip-full python3-pip lz4 erofs-utils f2fs-tools libvixl-dev
+        sudo apt -y install cpio aria2 git python3 neofetch tar gzip p7zip-full python3-pip lz4 erofs-utils f2fs-tools libvixl-dev m4 checkpolicy
         pip install gdown
 
     - name: Setup GithubCLI
