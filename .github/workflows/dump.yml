@@ -243,10 +243,10 @@ jobs:
         # Очищаем временное дерево сборщика
         rm -rf ${{ github.workspace }}/input_sepolicy
         
-name: Uploading ROM Dump (Only Archive to Release)
-env:
-GH_TOKEN: ${{ secrets.GTOKEN }}
-run: |
+ - name: Uploading ROM Dump (Only Archive to Release)
+   env:
+   GH_TOKEN: ${{ secrets.GTOKEN }}
+  run: |
     codename=$(cat ${{ github.workspace }}/codename.txt)
     brand=$(cat ${{ github.workspace }}/brand.txt)
     version=$(cat ${{ github.workspace }}/version.txt)
