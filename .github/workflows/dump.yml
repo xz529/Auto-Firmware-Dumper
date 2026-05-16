@@ -174,9 +174,8 @@ jobs:
         echo "$codename" > ${{ github.workspace }}/codename.txt
         echo "$brand" > ${{ github.workspace }}/brand.txt
         echo "$version" > ${{ github.workspace }}/version.txt
-
-
-              - name: Uploading ROM Dump
+        
+    - name: Uploading ROM Dump
       env:
         GH_TOKEN: ${{ secrets.GTOKEN }} 
       run: |
